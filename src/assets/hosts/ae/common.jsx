@@ -1,520 +1,177 @@
-function textAnimatorAfterEffects() {
-    this.appVersion = parseFloat(app.version.match(/\d+\.\d+|^([^\.])\d+/g));
-    this.PropertyTypes = {
-        color: 6418,
-        slider: 6417,
-        text: 6424,
-        point2D: 6415,
-        point3D: 6413,
-        layer: 6421
-    }
-    // stores setting last readed values to change their value later
-    this.lastReadedProperties = [];
-    // stores setting last readed comp
-    this.lastReadedComp = null;
-    // index of last readed setting group
-    this.lastGroupIndex = -1;
-
-    this.colorPickerValues = [50, 50, 50, 100];
-}
-
-/**
- * Open AEP project file
- * @param {filePath}    string  AEP project file path
- * @return {void}
- */
-textAnimatorAfterEffects.prototype.openAEPProject = function (filePath) {
-    var myFile = new File(filePath);
-    app.open(myFile);
-}
-
-/**
-     * imports an aep
-     *
-     * @param path absolute path to aep file
-     * @param data optional data
-     * @return {item} imported item
-**/
-textAnimatorAfterEffects.prototype.importItem = function (path, data) {
-    app.beginSuppressDialogs();
-    var io = new ImportOptions(new File(path));
-    io.importAs = ImportAsType.PROJECT;
-    var importedItem = app.project.importFile(io);
-    this.addImportedCompsAsLayer(importedItem);
-    for (var i = importedItem.items.length; i >= 1; i--) {
-        importedItem.item(i).parentFolder = importedItem.parentFolder;
-    }
-    importedItem.remove();
-    app.endSuppressDialogs(false);
-    return importedItem;
-}
-/**
-     * imports a footage in aftereffects
-     *
-     * @param path absolute path to footage file
-     * @return {item} imported footage item
-**/
-textAnimatorAfterEffects.prototype.importFootage = function (path, asSequence) {
-    app.beginSuppressDialogs();
-    var io = new ImportOptions(new File(path));
-    io.importAs = ImportAsType.FOOTAGE;
-    if (true == asSequence) {
-        io.sequence = true;
-    }
-    var importedItem = app.project.importFile(io);
-    app.endSuppressDialogs(false);
-    return importedItem;
-}
-
-/**
-     * applies a preset in aftereffects
-     *
-     * @param path absolute path to ffx file
-     * @return {void}
-**/
-textAnimatorAfterEffects.prototype.applyPreset = function (path) {
-    app.beginSuppressDialogs();
-    var preset = File(path);
-    if (app.project.activeItem && app.project.activeItem.selectedLayers.length) {
-        for (var i = 0; i < app.project.activeItem.selectedLayers.length; i++) {
-            app.project.activeItem.selectedLayers[i].applyPreset(preset);
-        }
-        if (app.project.activeItem.selectedLayers.length == 1) {
-          //  $._textAnimatorAfterEffects.fireLiveSettingEvent();
-        }
-    }
-    app.endSuppressDialogs(false);
-    return;
-}
-
-/**
-     * dispatchs an event
-     *
-     * @param type the type of event(for example clicked, added ...)
-     *
-     * @param data specific data that should dispatch with the event.
-     * 
-**/
-textAnimatorAfterEffects.prototype.fireEvent = function (type, data) {
-
-    var externalObjectName;
-    if (Folder.fs === 'Macintosh') {
-        externalObjectName = "PlugPlugExternalObject";
-    } else {
-        externalObjectName = "PlugPlugExternalObject.dll";
-    }
-    var mylib = new ExternalObject('lib:' + externalObjectName);
-    var csxsEvent = new CSXSEvent();
-    csxsEvent.type = type;
-    csxsEvent.data = data || '';
-    csxsEvent.dispatch();
-
-}
-/**
-     * get given property details and values and stores in lastReadedProperties
-     *
-     * @param {layer[]} controllerLayers control settings layer
-     * @param {textLayers[]} textLayers text layers
-     * @return {any[]} some property of read layers
-     * 
-**/
-textAnimatorAfterEffects.prototype.getLayerProperties = function (controllerLayers, textLayers) {
-    var result = [];
-    for (var layersIndex = 0; layersIndex < controllerLayers.length; layersIndex++) {
-        var properties = controllerLayers[layersIndex].property("ADBE Effect Parade");
-        var controllers = this.readSettingControllers(properties, this.lastGroupIndex, []);
-        for (var i = 0; i < controllers.length; i++) {
-            var controller = controllers[i];
-            this.lastReadedProperties.push({ prop: controller.obj, removeFunction: controller.removeFunction, changeRTLFunction: controller.changeRTLFunction });
-            result.push({
-                name: controller.name,
-                index: controller.index,
-                type: controller.type,
-                value: controller.value,
-                min: controller.min,
-                max: controller.max,
-                parentIndex: controller.parentIndex,
-                hasFx: controller.hasFx,
-                fx: controller.fx,
-                hasKey: controller.hasKey,
-                key: controller.key,
-                valueOptions: controller.valueOptions,
-                description: controller.randomKey !="" && controller.randomKey ? controller.description + "-"+ controller.randomKey :controller.description,
-                isABProperty: controller.isABProperty,
-                rtlStatus: controller.rtlStatus
-            })
-        }
-    }
-    if (textLayers.length) {
-        var groupIndex = this.generateTextGroup(result);
-        for (var i = 0; i < textLayers.length; i++) {
-            var textProperty = textLayers[i].property("ADBE Text Properties").property("ADBE Text Document");
-            result.push({
-                name: textLayers[i].name,
-                index: result.length,
-                type: this.getPropertyType(textProperty),
-                value: textProperty.value.text,
-                parentIndex: groupIndex,
-                hasKey: textProperty.canVaryOverTime,
-                key: textProperty.numKeys > 0 ? true : false,
-            })
-            this.lastReadedProperties.push({ prop: textProperty, removeFunction: null, changeRTLFunction: null });
-        }
-    }
-    return result;
-}
-
-
-textAnimatorAfterEffects.prototype.generateTextGroup = function (result) {
-    this.lastReadedProperties.push({ prop: null, removeFunction: null, changeRTLFunction: null });
-    result.push({
-        name: 'Text Inputs',
-        index: result.length,
-        type: 200,
-        parentIndex: -1,
-        hasFx: false,
-        fx: false
-    });
-    return result.length - 1;
-}
-/**
-     * get property type to load in setting component
-     * @param {property} property
-     * @return {number} type of item
-     * 
-**/
-textAnimatorAfterEffects.prototype.getPropertyType = function (property) {
-    var itemType;
-    var type = property.propertyValueType;
-    switch (type) {
-        case this.PropertyTypes.slider:
-            if (!property.hasMin && !property.hasMax) {
-                itemType = 3;
-            } //TODO: we should have a unique key to seperate checkbox from slider
-            else if (property.minValue == 0 && property.maxValue == 1) {
-                //we should set value to find type of controller between slider and checkbox 
-                var currentValue = property.value;
-                property.setValue(0.8);
-                if (property.value == 1) {
-                    property.setValue(currentValue);
-                    itemType = 1;
-                } else {
-                    property.setValue(currentValue);
-                    itemType = 2;
-                }
-            } else {
-                itemType = 2;
-            }
-            break;
-        case this.PropertyTypes.color:
-            itemType = 4;
-            break;
-        case this.PropertyTypes.text:
-            itemType = 6;
-            var regex = /(\r\n)+|\r+|\n+|\\r+|\\n+/g;
-            if (regex.test(property.value.text)) {
-                itemType = 100;
-            }
-            break;
-        case this.PropertyTypes.point2D:
-            itemType = 5;
-            break;
-        case this.PropertyTypes.point3D:
-            itemType = 5;
-            break;
-        case this.PropertyTypes.layer:
-            itemType = 16
-            break;
-        default:
-            itemType = 0;
-    }
-    return itemType;
-}
-
-/**
-     * get current active comp or layer setting
-     * @param {CompItem} comp
-     * @return {string} setting data
-     * 
-**/
-textAnimatorAfterEffects.prototype.getCompSetting = function (comp) {
-    try {
-        if (comp) {
-            this.lastReadedComp = comp;
-            this.lastReadedProperties.length = 0;
-            if (comp.selectedLayers && comp.selectedLayers.length === 1) {
-                var layerEffects = this.getLayerProperties([comp.selectedLayers[0]], []);
-                if (layerEffects.length > 0) {
-                    return layerEffects;
-                }
-                var innerCompResult = this.getCompSetting(comp.selectedLayers[0].source);
-                if (innerCompResult.length > 0) {
-                    this.lastReadedComp = comp.selectedLayers[0].source;
-                    return innerCompResult
-                };
-            }
-            var textLayers = [];
-            for (var i = 1; i <= comp.layers.length; i++) {
-                var layer = comp.layer(i);
-                if (layer instanceof TextLayer && !(/(^_.+(?:_|(?:_\s))$)/g.test(layer.name.toString()))) {
-                    textLayers.push(layer)
-                }
-            }
-            var settingLayers = [];
-            for (var i = 1; i <= comp.layers.length; i++) {
-                var layer = comp.layer(i);
-                if ((/setting/gi.test(layer.name.toString()))) {
-                    settingLayers.push(layer)
-                }
-            }
-
-            return this.getLayerProperties(settingLayers, textLayers);
-        }
-        return [];
-    }
-    catch (e) {
-        var externalObjectName;
-        if (Folder.fs === 'Macintosh') {
-            externalObjectName = "PlugPlugExternalObject";
-        } else {
-            externalObjectName = "PlugPlugExternalObject.dll";
-        }
-        var mylib = new ExternalObject('lib:' + externalObjectName);
-        var csxsEvent = new CSXSEvent();
-        csxsEvent.type = 'triggerError';
-        csxsEvent.data = JSON.stringify(e);
-        csxsEvent.dispatch();
-        return [];
-    }
-}
-/**
-     * reads a property inner controllers and return array
-     * @param {PropertyGroup} properties group property
-     * @param {number} parentIndex index of parent controller
-     * @param {number} resultArray result array
-     * @return {any[]} readed controllers as an array
-     * 
-**/
-textAnimatorAfterEffects.prototype.readSettingControllers = function (properties, parentIndex, resultArray) {
-    for (var i = 1; i <= properties.numProperties; i++) {
-        var property = properties.property(i);
-        if (property.name != "Compositing Options" && property.propertyValueType != PropertyValueType.CUSTOM_VALUE) {
-            if (!(property instanceof PropertyGroup) && property.propertyValueType != PropertyValueType.NO_VALUE && property.value != null) {
-                resultArray.push({
-                    name: properties.property(i).name,
-                    index: resultArray.length,
-                    value: property.value,
-                    parentIndex: this.lastGroupIndex !== -1 ? this.lastGroupIndex : parentIndex,
-                    obj: property,
-                    type: this.getPropertyType(property),
-                    max: property.hasMax ? property.maxValue : 0,
-                    min: property.hasMin ? property.minValue : 0,
-                    hasKey: property.canVaryOverTime,
-                    key: property.numKeys > 0 ? true : false,
-                    valueOptions: this.getPropertyType(property) === 16 ? this.readCompLayers(this.lastReadedComp) : []
-                })
-            }
-            else {
-                var isABProperty = this.isTextAnimatorProperty(property);
-                var group = {
-                    name: isABProperty && property.propertyType == 6213 ? TextAnimatorObject.getPropsFromString(property.name).typeName :
-                        properties.property(i).name,
-                    index: resultArray.length,
-                    type: property.propertyType == 6213 ? 200 : (property.name ? 201 : 202),
-                    parentIndex: this.lastGroupIndex !== -1 ? this.lastGroupIndex : parentIndex,
-                    obj: property,
-                    hasFx: !isABProperty && property.canSetEnabled,
-                    fx: property.enabled,
-                    description: isABProperty ? TextAnimatorObject.getPropsFromString(property.name).name : '',
-                    randomKey: isABProperty? TextAnimatorObject.getPropsFromString(property.name).randomKey: "",
-                    removeFunction: this.getRemoveFunction(property),
-                    changeRTLFunction: this.getChangeRTLFunction(property),
-                    isABProperty: isABProperty ? true : false,
-                    rtlStatus: isABProperty ? TextAnimatorObject.getRTLStatus(property) : false
-                };
-                this.lastGroupIndex = group.type != 202 ? group.index : parentIndex;
-                resultArray.push(group);
-                if (property.numProperties) {
-                    this.readSettingControllers(property, this.lastGroupIndex, resultArray);
-                }
-            }
-        }
-    }
-    this.lastGroupIndex = -1;
-    return resultArray;
-}
-
-textAnimatorAfterEffects.prototype.getRemoveFunction = function (property) {
-    if (this.isTextAnimatorProperty(property)) {
-        return $._TextAnimator.removeEffect;
-    }
-    else {
-        return this.removeEffectOfSelectedLayer;
-    }
-}
-
-
-textAnimatorAfterEffects.prototype.getChangeRTLFunction = function (property) {
-    if (this.isTextAnimatorProperty(property)) {
-        return $._TextAnimator.changeRTLStatus;
-    }
-    else {
-        return function () { };
-    }
-}
-
-textAnimatorAfterEffects.prototype.isTextAnimatorProperty = function (property) {
-    return property.name && /^([A-Z0-9\s]+)_([a-zA-Z0-9\s]+)_([a-zA-Z0-9\s]+)_([A-Z])(-[\w\d]{1,3})?$/g.test(property.name);
-}
-/**
-     * gets a value and set it on property
-     * @param {number} index index of property that should modify
-     * @param {any} value that should set on property
-     * @param {boolean} key add value with key
-     * @return {void}
-**/
-textAnimatorAfterEffects.prototype.setLayerProperty = function (index, value, key) {
-    if (this.lastReadedProperties.length && this.lastReadedProperties[index].prop) {
-        var property = this.lastReadedProperties[index].prop;
-        (property instanceof PropertyGroup) && property.propertyType == 6213 ? property.enabled = value :
-            (key ? property.setValueAtTime(this.lastReadedComp.time, value) : property.setValue(value));
-    }
-}
-
-/**
-     * removes all keys of a property
-     * @param {any} property object of property
-     * @return {void}
-**/
-textAnimatorAfterEffects.prototype.removeAllKeys = function (property) {
-    var numKeys = property.numKeys;
-    if (numKeys) {
-        for (var i = 1; i <= numKeys; i++) {
-            property.removeKey(1);
-        }
-    }
-}
-
-/**
-     * removes a effect
-     * @param {any} property
-     * @return {void}
-**/
-textAnimatorAfterEffects.prototype.removeEffectOfSelectedLayer = function (property) {
-    if (property && property instanceof PropertyGroup && property.propertyType == 6213) {
-        property.remove();
-    }
-}
-
-/**
-     * reads all layers in comp
-     * @param {any} comp object of comp
-     * @return {any[]} list of layers in comp
-**/
-textAnimatorAfterEffects.prototype.readCompLayers = function (comp) {
-    var result = [];
-    result.push({ index: 0, name: 'None' });
-    if (comp) {
-        for (var i = 1; i <= comp.layers.length; i++) {
-            result.push({ index: i, name: comp.layer(i).name });
-        }
-    }
-    return result;
-}
-/**
-     * checks if activeComp is exist and imported item has unused comps then it will add unused comps as layer to activeItem
-     * @param {any} rootFolder object of imported project
-     * @return {void}
-**/
-textAnimatorAfterEffects.prototype.addImportedCompsAsLayer = function (rootFolder) {
-    var activeComp = app.project.activeItem;
-    if (activeComp && activeComp instanceof CompItem) {
-        for (var i = 1; i <= rootFolder.items.length; i++) {
-            var item = rootFolder.item(i);
-            if (item instanceof CompItem && item.usedIn.length == 0) {
-                activeComp.layers.add(item);
-            }
-            else if (item instanceof FolderItem)
-                this.addImportedCompsAsLayer(item)
-        }
-    }
-}
-textAnimatorAfterEffects.prototype.random = function (min,max) // min and max included
-{
-    return Math.floor(Math.random()*(max-min+1)+min);
-}
-
-var textAnimatorAfterEffectsObject = new textAnimatorAfterEffects();
-$._textAnimatorAfterEffects = {
-    importItem: function (path, data, asSequence) {
-        textAnimatorAfterEffectsObject.importItem(path, data);
-    },
-    importFootage: function (path, asSequence) {
-        var importedItem = textAnimatorAfterEffectsObject.importFootage(path, asSequence);
-        if (app.project.activeItem && app.project.activeItem instanceof CompItem && importedItem) {
-            app.project.activeItem.layers.add(importedItem);
-        }
-    },
-
-    applyPreset: function (path) {
-        textAnimatorAfterEffectsObject.applyPreset(path);
-    },
-
-    fireLiveSettingEvent: function () {
-        var compName = '';
-        textAnimatorAfterEffectsObject.lastReadedProperties.length = 0;
-        var controllers = textAnimatorAfterEffectsObject.getCompSetting(app.project.activeItem);
-        if (textAnimatorAfterEffectsObject.lastReadedComp && controllers.length) {
-            compName = textAnimatorAfterEffectsObject.lastReadedComp.name;
-        }
-        if (textAnimatorAfterEffectsObject.lastReadedComp.selectedLayers && textAnimatorAfterEffectsObject.lastReadedComp.selectedLayers.length === 1) {
-            compName = textAnimatorAfterEffectsObject.lastReadedComp.selectedLayers[0].name;
-        }
-        textAnimatorAfterEffectsObject.fireEvent('LayerChanged', JSON.stringify({ headerName: compName, controllers: controllers }));
-    },
-    setLayerProperty: function (index, value, key) {
-        textAnimatorAfterEffectsObject.setLayerProperty(index, value, (key == undefined || key == false) ? false : true);
-    },
-    removeAllKeys: function (index) {
-        textAnimatorAfterEffectsObject.removeAllKeys(textAnimatorAfterEffectsObject.lastReadedProperties[index].prop);
-    },
-    removeEffect: function (effectIndex) {
-        if (textAnimatorAfterEffectsObject.lastReadedProperties[parseInt(effectIndex)].prop == null) {
-            return;
-        }
-        var layer = textAnimatorAfterEffectsObject.lastReadedComp.selectedLayers[0];
-        var propObj = textAnimatorAfterEffectsObject.lastReadedProperties[parseInt(effectIndex)];
-        propObj.removeFunction(propObj.prop);
-        if (layer) layer.selected = true;
-        this.fireLiveSettingEvent();
-    },
-    changeRTLStatus: function (effectIndex) {
-        if (textAnimatorAfterEffectsObject.lastReadedProperties[parseInt(effectIndex)].prop == null) {
-            return;
-        }
-        var propObj = textAnimatorAfterEffectsObject.lastReadedProperties[parseInt(effectIndex)];
-        propObj.changeRTLFunction(propObj.prop);
-    },
-
-    openAEPProject: function (path) {
-        textAnimatorAfterEffectsObject.openAEPProject(path);
-    },
-    showPluginMessage: function () {
-        textAnimatorAfterEffectsObject.fireEvent('showPluginMessage', JSON.stringify({}));
-    },
-    onMFColorPickerSelected: function (red, blue, green, alpha) {
-        if (red >= 0 && green >= 0 && blue >= 0 && alpha >= 0) {
-            textAnimatorAfterEffectsObject.colorPickerValues = [red, green, blue, alpha];
-            textAnimatorAfterEffectsObject.fireEvent('colorPickerSelected', JSON.stringify({ red: red, green: green, blue: blue }));
-        } else {
-            return false;
-        }
-    },
-    getColorPickerValues: function () {
-        return textAnimatorAfterEffectsObject.colorPickerValues.join(' ');
-    },
-    openColorPicker: function (red, green, blue, alpha) {
-        textAnimatorAfterEffectsObject.colorPickerValues = [red, blue, green, alpha];
-        app.executeCommand(app.findMenuCommandId("TAColorPicker"));
-    }
-}
+@JSXBIN@ES@2.0@MyBbyBnABMAbyBn0AGJBnABXzKjBjQjQiWjFjSjTjJjPjOBfezEjUjIjJjTCfEjzK
+jQjBjSjTjFiGjMjPjBjUDfRBEXzFjNjBjUjDjIEfXzHjWjFjSjTjJjPjOFfjzDjBjQjQGfRBYUicjEh
+LichOicjEhLjciehIibieichOidhJicjEhLBjHffffnfJCnABXzNiQjSjPjQjFjSjUjZiUjZjQjFjTH
+feCfWzGiPjCjKjFjDjUIGzFjDjPjMjPjSJFd2SZzGjTjMjJjEjFjSKFd2RZzEjUjFjYjULFd2YZzHjQ
+jPjJjOjUhSiEMFd2PZzHjQjPjJjOjUhTiENFd2NZzFjMjBjZjFjSOFd2VZnfJLnABXzUjMjBjTjUiSj
+FjBjEjFjEiQjSjPjQjFjSjUjJjFjTPfeCfAnnfJNnABXzOjMjBjTjUiSjFjBjEjFjEiDjPjNjQQfeCf
+nbfJPnABXzOjMjBjTjUiHjSjPjVjQiJjOjEjFjYRfeCfndyBfJRnABXzRjDjPjMjPjSiQjJjDjLjFjS
+iWjBjMjVjFjTSfeCfAREFdhSFdhSFdhSFdjEfnf0DzYjUjFjYjUiBjOjJjNjBjUjPjSiBjGjUjFjSiF
+jGjGjFjDjUjTTASVJZnABXzOjPjQjFjOiBiFiQiQjSjPjKjFjDjUUfXzJjQjSjPjUjPjUjZjQjFVfjT
+fNyBnAMZbyBn0ACJganASzGjNjZiGjJjMjFWAEjzEiGjJjMjFXfRBVzIjGjJjMjFiQjBjUjIYfBftnf
+tJgbnAEXzEjPjQjFjOZfjGfRBVWfAffACW40BiAY40BhABBAzAgaCgcnfJhFnABXzKjJjNjQjPjSjUi
+JjUjFjNgbfXVfjTfNyBnAMhFbyBn0AJJhGnAEXzUjCjFjHjJjOiTjVjQjQjSjFjTjTiEjJjBjMjPjHj
+TgcfjGfnfJhHnASzCjJjPgdAEjzNiJjNjQjPjSjUiPjQjUjJjPjOjTgefRBEjXfRBVzEjQjBjUjIgff
+DftftnftJhInABXzIjJjNjQjPjSjUiBjThAfVgdfAXzHiQiSiPiKiFiDiUhBfjzMiJjNjQjPjSjUiBj
+TiUjZjQjFhCfnfJhJnASzMjJjNjQjPjSjUjFjEiJjUjFjNhDBEXzKjJjNjQjPjSjUiGjJjMjFhEfXzH
+jQjSjPjKjFjDjUhFfjGfRBVgdfAffnftJhKnAEXzXjBjEjEiJjNjQjPjSjUjFjEiDjPjNjQjTiBjTiM
+jBjZjFjShGfeCfRBVhDfBffKhLbyhMn0ABJhMnABXzMjQjBjSjFjOjUiGjPjMjEjFjShHfEXzEjJjUj
+FjNhIfVhDfBRBVzBjJhJfCffXhHfVhDfBnfAShJCXzGjMjFjOjHjUjIhKfXzFjJjUjFjNjThLfVhDfB
+nftCzChehdhMVhJfCnndBThJCyBtJhOnAEXzGjSjFjNjPjWjFhNfVhDfBnfJhPnAEXzSjFjOjEiTjVj
+QjQjSjFjTjTiEjJjBjMjPjHjThOfjGfRBFcfffZhQnAVhDfBAFhJ4C0AiAzEjEjBjUjBhP4B0AhAgd4
+0BiAgf40BhAhD4B0AiACDAgaChRnfJhYnABXzNjJjNjQjPjSjUiGjPjPjUjBjHjFhQfXVfjTfNyBnAM
+hYbyBn0AHJhZnAEXgcfjGfnfJhanASgdAEjgefRBEjXfRBVgffCftftnftJhbnABXhAfVgdfAXzHiGi
+PiPiUiBiHiFhRfjhCfnfOhcbyhdn0ABJhdnABXzIjTjFjRjVjFjOjDjFhSfVgdfAnctfACzChdhdhTn
+VzKjBjTiTjFjRjVjFjOjDjFhUfDctnnJhfnAShDBEXhEfXhFfjGfRBVgdfAffnftJiAnAEXhOfjGfRB
+FcfffZiBnAVhDfBAEhU4B0AhAgd40BiAgf40BhAhD4B0AiACCAgaCiCnfJiKnABXzLjBjQjQjMjZiQj
+SjFjTjFjUhVfXVfjTfNyBnAMiKbyBn0AFJiLnAEXgcfjGfnfJiMnASzGjQjSjFjTjFjUhWAEjXfRBVg
+ffCffnftOiNbiOn0ACaiObyiPn0ABJiPnAEXhVfQgafXzOjTjFjMjFjDjUjFjEiMjBjZjFjSjThXfXz
+KjBjDjUjJjWjFiJjUjFjNhYfXhFfjGfVhJfBRBVhWfAffAVhJfBAXhKfXhXfXhYfXhFfjGfByBzBhch
+ZOiRnAChTXhKfXhXfXhYfXhFfjGfnndBnAUzChGhGhaXhYfXhFfjGfXhKfXhXfXhYfXhFfjGfnnnJiV
+nAEXhOfjGfRBFcfffZiWnAnADhW40BiAhJ4B0AiAgf40BhABCAgaCiXnfJjBnABXzJjGjJjSjFiFjWj
+FjOjUhbfXVfjTfNyBnAMjBbyBn0AGOjEbyjFn0ABJjFnASzSjFjYjUjFjSjOjBjMiPjCjKjFjDjUiOj
+BjNjFhcAneWiQjMjVjHiQjMjVjHiFjYjUjFjSjOjBjMiPjCjKjFjDjUffACzDhdhdhdhdXzCjGjThef
+jzGiGjPjMjEjFjShffnneJiNjBjDjJjOjUjPjTjIbyjHn0ABJjHnAShcAnegaiQjMjVjHiQjMjVjHiF
+jYjUjFjSjOjBjMiPjCjKjFjDjUhOjEjMjMffJjJnASzFjNjZjMjJjCiABEjzOiFjYjUjFjSjOjBjMiP
+jCjKjFjDjUiBfRBCzBhLiCnVhcfAeEjMjJjChanftnftJjKnASzJjDjTjYjTiFjWjFjOjUiDCEjzJiD
+iTiYiTiFjWjFjOjUiEfntnftJjLnABXzEjUjZjQjFiFfViDfCViFfDnfJjMnABXhPfViDfCUzCjcjci
+GVhPfEnneAnfJjNnAEXzIjEjJjTjQjBjUjDjIiHfViDfCnfAFhc40BiAiA4B0AiAiD4C0AiAhP4B0Ah
+AiF40BhACDAgaCjPnfJjYnABXzSjHjFjUiMjBjZjFjSiQjSjPjQjFjSjUjJjFjTiIfXVfjTfNyBnAMj
+YbyBn0AEJjZnASzGjSjFjTjVjMjUiJAAnnftajabjbn0ADJjbnASzKjQjSjPjQjFjSjUjJjFjTiKCEX
+zIjQjSjPjQjFjSjUjZiLfQgafVzQjDjPjOjUjSjPjMjMjFjSiMjBjZjFjSjTiMfIVzLjMjBjZjFjSjT
+iJjOjEjFjYiNfBRBFeSiBiEiCiFhAiFjGjGjFjDjUhAiQjBjSjBjEjFffnftJjcnASzLjDjPjOjUjSj
+PjMjMjFjSjTiODEXzWjSjFjBjEiTjFjUjUjJjOjHiDjPjOjUjSjPjMjMjFjSjTiPfeCfRDViKfCXRfe
+CfAnffnftajdbjen0ADJjenASzKjDjPjOjUjSjPjMjMjFjSiQFQgafViOfDVhJfEnftJjfnAEXzEjQj
+VjTjIiRfXPfeCfRBWIDzEjQjSjPjQiSXzDjPjCjKiTfViQfFzOjSjFjNjPjWjFiGjVjOjDjUjJjPjOi
+UXiUfViQfFzRjDjIjBjOjHjFiSiUiMiGjVjOjDjUjJjPjOiVXiVfViQfFffJkAnAEXiRfViJfARBWIP
+zEjOjBjNjFiWXiWfViQfFzFjJjOjEjFjYiXXiXfViQfFiFXiFfViQfFzFjWjBjMjVjFiYXiYfViQfFz
+DjNjJjOiZXiZfViQfFzDjNjBjYiaXiafViQfFzLjQjBjSjFjOjUiJjOjEjFjYibXibfViQfFzFjIjBj
+TiGjYicXicfViQfFzCjGjYidXidfViQfFzGjIjBjTiLjFjZieXiefViQfFzDjLjFjZifXiffViQfFzM
+jWjBjMjVjFiPjQjUjJjPjOjTjAXjAfViQfFzLjEjFjTjDjSjJjQjUjJjPjOjBdUhaCzChBhdjCXzJjS
+jBjOjEjPjNiLjFjZjDfViQfFnneAXjDfViQfFnnCiCCiCXjBfViQfFnneBhNXjDfViQfFnnXjBfViQf
+FzMjJjTiBiCiQjSjPjQjFjSjUjZjEXjEfViQfFzJjSjUjMiTjUjBjUjVjTjFXjFfViQfFffAVhJfEAX
+hKfViOfDByBhZAViNfBAXhKfViMfIByBhZOkTbkUn0ACJkUnASzKjHjSjPjVjQiJjOjEjFjYjGGEXzR
+jHjFjOjFjSjBjUjFiUjFjYjUiHjSjPjVjQjHfeCfRBViJfAffnftakVbkWn0ADJkWnASzMjUjFjYjUi
+QjSjPjQjFjSjUjZjIHEXiLfEXiLfQgafVzKjUjFjYjUiMjBjZjFjSjTjJfJVhJfERBFeUiBiEiCiFhA
+iUjFjYjUhAiQjSjPjQjFjSjUjJjFjTffRBFeSiBiEiCiFhAiUjFjYjUhAiEjPjDjVjNjFjOjUffnftJ
+kXnAEXiRfViJfARBWIHiWXiWfQgafVjJfJVhJfEiXXhKfViJfAiFEXzPjHjFjUiQjSjPjQjFjSjUjZi
+UjZjQjFjKfeCfRBVjIfHffiYXLfXiYfVjIfHibVjGfGieXzPjDjBjOiWjBjSjZiPjWjFjSiUjJjNjFj
+LfVjIfHifdCzBhejMXzHjOjVjNiLjFjZjTjNfVjIfHnndAFctFcfffJlAnAEXiRfXPfeCfRBWIDiSVj
+IfHiUFbiVFbffAVhJfEAXhKfVjJfJByBhZAXhKfVjJfJnZlDnAViJf0AKjI4H0AiAiK4C0AiAhJ4E0A
+iAiJ40BiAiM40BhAjJ4B0AhAiN4B0AiAiO4D0AiAiQ4F0AiAjG4G0AiACIAgaClEnfJlHnABXjHfXVf
+jTfNyBnAMlHbyBn0ADJlInAEXiRfXPfeCfRBWIDiSFbiUFbiVFbffJlJnAEXiRfViJfARBWIGiWFeLi
+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

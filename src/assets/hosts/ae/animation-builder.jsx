@@ -1,441 +1,201 @@
-
-function TextAnimator() {
-    this.markersName = {
-        "In": "Intro",
-        "Out": "Outro"
-    }
-    this.lastLayer = null;
-}
-TextAnimator.prototype.getPropsFromString = function (name) {
-    var regex = /^([A-Z0-9\s]+)_([a-zA-Z0-9\s]+)_([a-zA-Z0-9\s]+)_([A-Z])[-]{0,1}([\w\d]{0,3})?$/g
-    var props = regex.exec(name);
-    return {
-        projectKey: props[1],
-        name: props[2],
-        typeName: props[3],
-        directionName: props[4],
-        randomKey: props[5]
-    }
-}
-TextAnimator.prototype.addMarker = function (layer, markerComment, time, duration, createIfExist, label) {
-    if (!createIfExist && this.checkMarkerExist(layer, markerComment)) return 0;
-    var myMarkerVal = new MarkerValue(markerComment);
-    myMarkerVal.duration = duration;
-    if(label && textAnimatorAfterEffectsObject.appVersion>=16){
-        myMarkerVal.label = label;
-    }
-    layer.property("ADBE Marker").setValueAtTime(time, myMarkerVal);
-}
-TextAnimator.prototype.removeMarker = function (layer, markerComment) {
-    for (var i = layer.property("ADBE Marker").numKeys; i >= 1; i--) {
-        if (layer.property("ADBE Marker").keyValue(i).comment == markerComment) {
-            layer.property("ADBE Marker").removeKey(i);
-            break;
-        }
-    }
-}
-
-TextAnimator.prototype.checkMarkerExist = function (layer, markerComment) {
-    var markerIsExist = false;
-    for (var i = 1; i <= layer.property("ADBE Marker").numKeys; i++) {
-        if (layer.property("ADBE Marker").keyValue(i).comment == markerComment) {
-            markerIsExist = true;
-            break;
-        }
-    }
-    return markerIsExist;
-
-}
-TextAnimator.prototype.removeEffect = function (effect) {
-    var layer = effect.parentProperty.parentProperty;
-    var effectProps = this.getPropsFromString(effect.name);
-    if (layer) {
-        var textPeroperties = layer.property("ADBE Text Properties").property("ADBE Text Animators");
-        var textPropertiesLength = textPeroperties.numProperties;
-        for (var i = textPropertiesLength; i >= 1; i--) {
-            var animator = textPeroperties.property(i);
-            if (animator.name.indexOf(effect.name) > -1) {
-                animator.remove();
-            }
-        }
-        effect.remove();
-        if(effectProps.typeName != "Effect"){
-            if (this.checkIfeffectWithTypeExistOnLayer(effectProps.typeName, layer) == 0 &&
-                this.checkMarkerExist(layer, this.markersName[effectProps.typeName])) {
-                this.removeMarker(layer, this.markersName[effectProps.typeName]);
-            }
-        }
-        else{
-            this.removeMarker(layer, "In-"+effectProps.randomKey);
-            this.removeMarker(layer, "Out-"+effectProps.randomKey);
-        }
-    }
-}
-
-
-
-TextAnimator.prototype.universalAppliedFxOfPreset = function (presetPath, layer) {
-    var presetName = this.getFileName(presetPath);
-    var fx = layer.property("ADBE Effect Parade").property(presetName);
-    if (fx) {
-        var oldName = fx.name;
-        fx.name = fx.name + '-' + this.getRandomKey();
-        var animators = layer.property("ADBE Text Properties").property("ADBE Text Animators");
-        // $.sleep(300);
-        for (var i = 1; i <= animators.numProperties; i++) {
-            var anim = animators.property(i);
-            if (anim.name.indexOf(presetName) > -1 && anim.name.match(/^.*-[a-zA-Z0-9 ]{3}/g)===null ) {
-                anim.name = anim.name.replace(oldName, fx.name);
-                this.checkChildrenPropertiesAndReplaceExpresseion(anim, oldName, fx.name);
-            }
-        }
-        fx.enabled = false;
-        fx.enabled = true;
-        return fx;
-    }
-}
-
-TextAnimator.prototype.universalMarkerFxOfPreset = function (presetName,newMarkerName, oldMarkerName, layer) {
-    var fx = layer.property("ADBE Effect Parade").property(presetName);
-    if (fx) {
-        var animators = layer.property("ADBE Text Properties").property("ADBE Text Animators");
-        for (var i = 1; i <= animators.numProperties; i++) {
-            var anim = animators.property(i);
-            if (anim.name.indexOf(presetName) > -1) {
-                this.checkChildrenPropertiesAndReplaceExpresseion(anim, oldMarkerName, newMarkerName);
-            }
-        }
-        fx.enabled = false;
-        fx.enabled = true;
-        return fx;
-    }
-}
-TextAnimator.prototype.checkChildrenPropertiesAndReplaceExpresseion = function (parentProperty, oldExp, newExp) {
-    for (var i = 1; i <= parentProperty.numProperties; i++) {
-        var property = parentProperty.property(i);
-        try {
-            if (property.expressionEnabled && property.expression && property.expression != '') {
-                var re = new RegExp(oldExp, 'g');
-                property.expression = property.expression.replace(re, newExp);
-                // for(var j = 0;j<2;j++){
-                //         try{
-                //             property.expressionEnabled = false;
-                //             property.setValue(property.value);
-                //             property.expressionEnabled = true;
-                //             //if(property.expression.indexOf(newExp)>-1) $.sleep(200);
-                //         }
-                //         catch(err){}
-                // }
-            }
-        }
-        catch (e) {
-         }
-        if (property.numProperties) {
-            this.checkChildrenPropertiesAndReplaceExpresseion(property, oldExp, newExp);
-        }
-    }
-}
-TextAnimator.prototype.checkChildrenPropertiesAndReversRTLStatus = function (parentProperty) {
-    for (var i = 1; i <= parentProperty.numProperties; i++) {
-        var property = parentProperty.property(i);
-        try {
-            if (property.expressionEnabled && property.expression && property.expression != '') {
-                var rtlReg = /RTL\s{0,3}=\s{0,3}(\d)/gm;
-                var checkRTL = /^\/\*RTL\*\/$/gm;
-                var matchs = rtlReg.exec(property.expression);
-                if (matchs && matchs.length >= 2) {
-                    var RTLStatus = parseInt(matchs[1]);
-                    if (RTLStatus == 0) RTLStatus = 1;
-                    else RTLStatus = 0;
-                    if(checkRTL.test(property.expression)){
-                        property.expression = property.expression.replace(checkRTL, '');
-                        property.expression = property.expression.replace(matchs[0], 'RTL = ' + RTLStatus);
-                    }
-                    else{
-                        property.expression = "/*RTL*/\r\n" + property.expression.replace(matchs[0], 'RTL = ' + RTLStatus);
-                    }
-                    property.expressionEnabled = false;
-                    property.expressionEnabled = true;
-                }
-            }
-        }
-        catch (e) { 
-            var externalObjectName;
-            if (Folder.fs === 'Macintosh') {
-                externalObjectName = "PlugPlugExternalObject";
-            } else {
-                externalObjectName = "PlugPlugExternalObject.dll";
-            }
-            var mylib = new ExternalObject('lib:' + externalObjectName);
-            var csxsEvent = new CSXSEvent();
-            csxsEvent.type = 'triggerError';
-            csxsEvent.data = JSON.stringify(e);
-            csxsEvent.dispatch();
-            return [];
-        }
-        if (property.numProperties) {
-            this.checkChildrenPropertiesAndReversRTLStatus(property);
-        }
-    }
-}
-TextAnimator.prototype.checkChildrenPropertiesAndGetRTLStatus = function (parentProperty) {
-    for (var i = 1; i <= parentProperty.numProperties; i++) {
-        var property = parentProperty.property(i);
-        try {
-            if (property.expressionEnabled && property.expression && property.expression != '') {
-                var rtlReg = /RTL\s{0,3}=\s{0,3}(\d)/gm;
-                var checkRTL = /^\/\*RTL\*\/$/gm;
-                if(rtlReg.test(property.expression)){
-                    return checkRTL.test(property.expression);
-                } 
-            }
-        }
-        catch (e) { 
-            var externalObjectName;
-            if (Folder.fs === 'Macintosh') {
-                externalObjectName = "PlugPlugExternalObject";
-            } else {
-                externalObjectName = "PlugPlugExternalObject.dll";
-            }
-            var mylib = new ExternalObject('lib:' + externalObjectName);
-            var csxsEvent = new CSXSEvent();
-            csxsEvent.type = 'triggerError';
-            csxsEvent.data = JSON.stringify(e);
-            csxsEvent.dispatch();
-            return [];
-        }
-        if (property.numProperties) {
-            return this.checkChildrenPropertiesAndGetRTLStatus(property);
-        }
-    }
-}
-TextAnimator.prototype.getRandomKey = function () {
-    var text = "";
-    var possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-
-    for (var i = 0; i < 3; i++)
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
-
-    return text;
-}
-TextAnimator.prototype.getFileName = function (filePath) {
-    var fileName = filePath.split(/(\\|\/)/g).pop();
-    return fileName.substr(0, fileName.lastIndexOf('.'));
-}
-
-TextAnimator.prototype.checkIfeffectWithTypeExistOnLayer = function (typeName, layer) {
-    var effects = layer.property("ADBE Effect Parade");
-    var count = 0;
-    for (var i = 1; i <= effects.numProperties; i++) {
-        var eff = effects.property(i)
-        if (textAnimatorAfterEffectsObject.isTextAnimatorProperty(eff)) {
-            var effectProps = this.getPropsFromString(eff.name);
-            if (effectProps.typeName === typeName) {
-                count++;
-            }
-        }
-    }
-    return count;
-}
-
-TextAnimator.prototype.changeRTLStatus = function (effectProp) {
-    var layer = effectProp.parentProperty.parentProperty;
-    if (layer) {
-        var textPeroperties = layer.property("ADBE Text Properties").property("ADBE Text Animators");
-        var textPropertiesLength = textPeroperties.numProperties;
-        for (var i = textPropertiesLength; i >= 1; i--) {
-            var animator = textPeroperties.property(i);
-            if (animator.name.indexOf(effectProp.name) > -1) {
-                this.checkChildrenPropertiesAndReversRTLStatus(animator);
-            }
-        }
-    }
-}
-TextAnimator.prototype.getRTLStatus = function (effectProp){
-    var layer = effectProp.parentProperty.parentProperty;
-    var RTL = false;
-    if (layer) {
-        var textPeroperties = layer.property("ADBE Text Properties").property("ADBE Text Animators");
-        var textPropertiesLength = textPeroperties.numProperties;
-        for (var i = textPropertiesLength; i >= 1; i--) {
-            var animator = textPeroperties.property(i);
-            if (animator.name.indexOf(effectProp.name) > -1) {
-                RTL = this.checkChildrenPropertiesAndGetRTLStatus(animator);
-            }
-        }
-    }
-    return RTL;
-}
-TextAnimator.prototype.activeMotionBlur = function(comp, layer){
-    if(comp && layer){
-        comp.motionBlur = true;
-        layer.motionBlur = true;
-    }
-}
-TextAnimator.prototype.getBestMarkerTime = function(time, layer, goLeft){
-    var markerProperty = layer.property("ADBE Marker");
-    if(markerProperty.numKeys === 0 ) return time>0? time: 0;
-    var keyIndex = markerProperty.nearestKeyIndex(time);
-    if(!keyIndex) return time;
-    var markerTimeAtTimeClosest = markerProperty.keyTime(keyIndex);
-    if(Math.abs(markerTimeAtTimeClosest-time)>0.5){
-        return time>0? time: this.getBestMarkerTime(time+0.5,layer, false);
-    }
-    else{
-        if(goLeft) return this.getBestMarkerTime((time-0.5>0)?(time-0.5):(time+0.5), layer, time>0 ?goLeft: false);
-        else return this.getBestMarkerTime(time+0.5, layer, goLeft);
-    }
-}
-
-TextAnimator.prototype.getMarkerUniqueLabel = function (layer){
-    if(textAnimatorAfterEffectsObject.appVersion < 16) return -1;
-    var labels = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16];
-    for(var i = 1; i<= layer.property("ADBE Marker").numKeys;i++){
-        var markerLabel = layer.property("ADBE Marker").keyValue(i).label;
-        if(markerLabel>0 && markerLabel <=16){
-            var index = this.searchArrayAndReturnIndex(labels, markerLabel);
-            if(index > -1) labels.splice(index,1); 
-        }
-    }
-    if(labels.length==0) labels = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16];
-    return labels[textAnimatorAfterEffectsObject.random(0,labels.length-1)];
-}
-TextAnimator.prototype.searchArrayAndReturnIndex = function(array, el){
-    var index = -1;
-    for(var i = 0; i<array.length;i++){
-        if(array[i]==el){
-            index = i;
-            break;
-        }
-    }
-    return index;
-}
-
-TextAnimator.prototype.fixExpressions = function (parentProperty) {
-    if(!parentProperty) parentProperty = this.lastLayer;
-    for (var i = 1; i <= parentProperty.numProperties; i++) {
-        var property = parentProperty.property(i);
-        try {
-            if (property.expressionEnabled && property.expression && property.expression != '') {
-               property.expressionEnabled = false;
-               property.expressionEnabled = true;
-            }
-        }
-        catch (e) {
-         }
-        if (property.numProperties) {
-            this.fixExpressions(property);
-        }
-    }
-}
-
-
-var TextAnimatorObject = new TextAnimator();
-$._TextAnimator = {
-    applyIn: function (presetPath, both) {
-        var layer = app.project.activeItem && app.project.activeItem.selectedLayers[0];
-        if(layer instanceof TextLayer) {
-        TextAnimatorObject.lastLayer = layer;
-        if(!both) app.beginUndoGroup("Apply In");
-        layer.selected = false;
-        layer.selected = true;
-        TextAnimatorObject.addMarker(layer, TextAnimatorObject.markersName.In, layer.inPoint, 2, false);
-        textAnimatorAfterEffectsObject.applyPreset(presetPath);
-        TextAnimatorObject.universalAppliedFxOfPreset(presetPath, layer);
-        TextAnimatorObject.activeMotionBlur(app.project.activeItem, layer);
-        if (app.project.activeItem.selectedLayers.length == 1 && !both) {
-            $._textAnimatorAfterEffects.fireLiveSettingEvent();
-          }
-        
-        if(!both) app.endUndoGroup();
-        }
-        else {
-            alert('please select a text layer');
-        }
-
-    },
-    applyOut: function (presetPath, both) {
-        var layer = app.project.activeItem && app.project.activeItem.selectedLayers[0];
-        if(layer instanceof TextLayer) {
-        TextAnimatorObject.lastLayer = layer;
-        if(!both) app.beginUndoGroup("Apply Out");
-        layer.selected = false;
-        layer.selected = true;
-        TextAnimatorObject.addMarker(layer, TextAnimatorObject.markersName.Out, layer.outPoint - 2.1, 2, false);
-        textAnimatorAfterEffectsObject.applyPreset(presetPath);
-        TextAnimatorObject.universalAppliedFxOfPreset(presetPath, layer);
-        TextAnimatorObject.activeMotionBlur(app.project.activeItem, layer);
-        if (app.project.activeItem.selectedLayers.length == 1 && !both) {
-            $._textAnimatorAfterEffects.fireLiveSettingEvent();
-          }
-        if(!both) app.endUndoGroup();
-        }
-        else {
-            alert('please select a text layer');
-        }
-    },
-    applyBoth: function (presetPath) {
-        presetPath = JSON.parse(presetPath);
-        var layer = app.project.activeItem && app.project.activeItem.selectedLayers[0];
-        if(layer instanceof TextLayer) {
-        TextAnimatorObject.lastLayer = layer;
-        app.beginUndoGroup("Apply In and Out");
-        layer.selected = false;
-        layer.selected = true;
-        this.applyIn(presetPath[0], true);
-        this.applyOut(presetPath[1], true);
-        TextAnimatorObject.activeMotionBlur(app.project.activeItem, layer);
-        if (app.project.activeItem.selectedLayers.length == 1) {
-            $._textAnimatorAfterEffects.fireLiveSettingEvent();
-          }
-        app.endUndoGroup();
-
-        }
-        else {
-            alert('please select a text layer');
-        }
-
-    },
-    applyEffect: function (presetPath) {
-        var layer = app.project.activeItem && app.project.activeItem.selectedLayers[0];
-        var comp =  app.project.activeItem;
-        if(layer instanceof TextLayer) {
-        TextAnimatorObject.lastLayer = layer;
-        app.beginUndoGroup("Apply Effect");
-        layer.selected = false;
-        layer.selected = true;
-        textAnimatorAfterEffectsObject.applyPreset(presetPath);
-        var fx = TextAnimatorObject.universalAppliedFxOfPreset(presetPath, layer);
-        var fxInfo = TextAnimatorObject.getPropsFromString(fx.name);
-        var inMarkerName = "In-" + fxInfo.randomKey;
-        var outMarkerName = "Out-"+ fxInfo.randomKey;
-        var colorLabel = TextAnimatorObject.getMarkerUniqueLabel(layer);
-        TextAnimatorObject.addMarker(layer,inMarkerName , TextAnimatorObject.getBestMarkerTime(comp.time-2, layer, true), 1, false, colorLabel);
-        TextAnimatorObject.addMarker(layer,outMarkerName ,TextAnimatorObject.getBestMarkerTime(comp.time + 1, layer, false), 1, false, colorLabel);
-        TextAnimatorObject.universalMarkerFxOfPreset(fx.name, "= '"+inMarkerName+"';","= 'In';", layer);
-        TextAnimatorObject.universalMarkerFxOfPreset(fx.name, "= '"+outMarkerName+"';","= 'Out';", layer);
-        TextAnimatorObject.activeMotionBlur(app.project.activeItem, layer);
-        if (app.project.activeItem.selectedLayers.length == 1) {
-            $._textAnimatorAfterEffects.fireLiveSettingEvent();
-          }
-        app.endUndoGroup();
-        }
-        else {
-            alert('please select a text layer');
-        }
-
-    },
-    removeEffect: function (prop) {
-        app.beginUndoGroup("Remove Effect");
-        TextAnimatorObject.removeEffect(prop);
-        app.endUndoGroup();
-    },
-    changeRTLStatus: function (prop) {
-        app.beginUndoGroup("Change RTL Status");
-        TextAnimatorObject.changeRTLStatus(prop);
-        app.endUndoGroup();
-    },
-    getRTLStatus: function (prop){
-        return TextAnimatorObject.getRTLStatus(prop);
-    }
-}
+@JSXBIN@ES@2.0@MyBbyBnABMBbyBn0ACJCnABXzLjNjBjSjLjFjSjTiOjBjNjFBfezEjUjIjJjTCfWz
+GiPjCjKjFjDjUDCzCiJjOEFeFiJjOjUjSjPzDiPjVjUFFeFiPjVjUjSjPnfJGnABXzJjMjBjTjUiMjB
+jZjFjSGfeCfnbf0DzMiUjFjYjUiBjOjJjNjBjUjPjSHAHWJInABXzSjHjFjUiQjSjPjQjTiGjSjPjNi
+TjUjSjJjOjHIfXzJjQjSjPjUjPjUjZjQjFJfjHfNyBnAMIbyBn0ADJJnASzFjSjFjHjFjYKAYiPiehI
+ibiBhNiahQhNhZicjTidhLhJifhIibjBhNjaiBhNiahQhNhZicjTidhLhJifhIibjBhNjaiBhNiahQh
+NhZicjTidhLhJifhIibiBhNiaidhJibhNidjbhQhMhRjdhIibicjXicjEidjbhQhMhTjdhJhfhEBjHn
+ftJKnASzFjQjSjPjQjTLBEXzEjFjYjFjDMfVKfARBVzEjOjBjNjFNfCffnftZLnAWDFzKjQjSjPjKjF
+jDjUiLjFjZOXzBhRPfVLfBNXzBhSQfVLfBzIjUjZjQjFiOjBjNjFRXzBhTSfVLfBzNjEjJjSjFjDjUj
+JjPjOiOjBjNjFTXzBhUUfVLfBzJjSjBjOjEjPjNiLjFjZVXzBhVWfVLfBADN40BhAL4B0AiAK40BiAB
+CAzAXCSnfJTnABXzJjBjEjEiNjBjSjLjFjSYfXJfjHfNyBnAMTbyBn0AFOUZUnAFd0AUzChGhGZhzBh
+BgaVzNjDjSjFjBjUjFiJjGiFjYjJjTjUgbfFEXzQjDjIjFjDjLiNjBjSjLjFjSiFjYjJjTjUgcfeCfR
+CVzFjMjBjZjFjSgdfBVzNjNjBjSjLjFjSiDjPjNjNjFjOjUgefCffnnnJVnASzLjNjZiNjBjSjLjFjS
+iWjBjMgfAEjzLiNjBjSjLjFjSiWjBjMjVjFhAfRBVgefCftnftJWnABXzIjEjVjSjBjUjJjPjOhBfVg
+ffAVhBfEnfOXbyYn0ABJYnABXzFjMjBjCjFjMhCfVgffAVhCfGnfAUZVhCfGCzChehdhDXzKjBjQjQi
+WjFjSjTjJjPjOhEfjzgejUjFjYjUiBjOjJjNjBjUjPjSiBjGjUjFjSiFjGjGjFjDjUjTiPjCjKjFjDj
+UhFfnndQnnnJganAEXzOjTjFjUiWjBjMjVjFiBjUiUjJjNjFhGfEXzIjQjSjPjQjFjSjUjZhHfVgdfB
+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
