@@ -19,7 +19,7 @@ export class AppGlobals {
    * @public
    * @var APPVersion  Contains the current version
    */
-  public APPVersion = '1.1.0';
+  public APPVersion = '1.3.0';
 
   // process.env
   public processEnv: any = { APPDATA: '' };

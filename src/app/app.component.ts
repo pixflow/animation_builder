@@ -33,6 +33,11 @@ export class AppComponent implements OnInit {
       title: "OK, Do it!",
       class: "primary",
       callBackFunction: this.restartAE.bind(this)
+    },
+    {
+      title: "Install Later",
+      class: "secondary",
+      callBackFunction: this.onPluginMessageBoxClosed.bind(this)
     }
   ];
   @HostListener("window:resize", ["$event"])
@@ -103,7 +108,7 @@ export class AppComponent implements OnInit {
         `${this._osInfoService.gettextanimatorAppDataFolder()}/host-version.txt`,
         `open -a "Adobe After Effects CC ${appVersion}"`
       ); 
-    }
+      }
     this._ipcHandlerService
       .emitEvent("installDependencies", {
         runPluginChecker: true,

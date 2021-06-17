@@ -79,9 +79,12 @@ const checkPluginInstalled = (extensionPath) => {
 					const filePluginVersion = file.replace(`.${pluginExtension()}`, '').replace('textanimator', '');
 					if (filePluginVersion !== lastPluginVersion.toString()) {
 						if ('MAC' === currentPlatform()) {
-							pluginsToDelete.push(`${getAdobePluginPath()}/${file}`);
+							// removed due to the windows bug 
+							//pluginsToDelete.push(`${getAdobePluginPath()}/${file}`);
+							isPluginInstalled = true;
 						} else {
-							pluginsToDelete.push(`${getAdobePluginPath().replace(/\//g, '\\')}\\${file}`);
+						// 	pluginsToDelete.push(`${getAdobePluginPath().replace(/\//g, '\\')}\\${file}`);
+						isPluginInstalled = true;
 						}
 					} else {
 						isPluginInstalled = true;
